@@ -1,47 +1,23 @@
 const express = require("express");
 const cors = require("cors");
-const nodemailer = require("nodemailer");
+const { Resend } = require("resend");
 require("dotenv").config();
 
 const app = express();
 
-// ================= MIDDLEWARE =================
-
 app.use(cors());
 app.use(express.json());
 
-// Request logging
 app.use((req, res, next) => {
   console.log("REQUEST:", req.method, req.url);
   next();
 });
 
-// ================= OTP STORE =================
-
 const otpStore = new Map();
 
-// ================= GMAIL TRANSPORTER =================
+const resend = new Resend(process.env.RESEND_API_KEY);
 
-const transporter = nodemailer.createTransport({
-  host: "smtp.gmail.com",
-  port: 587,
-  secure: false,
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
-
-// Check Gmail SMTP connection
-transporter.verify((error, success) => {
-  if (error) {
-    console.error("Gmail SMTP Error:", error);
-  } else {
-    console.log("Gmail SMTP connection is ready");
-  }
-});
-
-// ================= HOME ROUTE =================
+// ================= HOME =================
 
 app.get("/", (req, res) => {
   res.send("OTP Backend is running!");
@@ -62,29 +38,34 @@ app.post("/send-otp", async (req, res) => {
       });
     }
 
-    // Generate 6-digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
-    // OTP expiry: 1 minute
     const expiresAt = Date.now() + 60 * 1000;
 
-    // Save OTP
     otpStore.set(email, {
-      otp: otp,
-      expiresAt: expiresAt,
+      otp,
+      expiresAt,
     });
 
     console.log("OTP generated for:", email);
 
-    // Send OTP email
-    await transporter.sendMail({
-      from: `"Ritesh Portfolio" <${process.env.EMAIL_USER}>`,
-      to: email,
+    const { data, error } = await resend.emails.send({
+      from: "Portfolio <onboarding@resend.dev>",
+      to: [email],
       subject: "Your Portfolio Verification OTP",
       text: `Your verification OTP is ${otp}. This OTP will expire in 1 minute.`,
     });
 
-    console.log("OTP email sent successfully to:", email);
+    if (error) {
+      console.error("Resend Error:", error);
+
+      return res.status(500).json({
+        success: false,
+        message: "Failed to send OTP",
+      });
+    }
+
+    console.log("OTP email sent successfully:", data);
 
     return res.status(200).json({
       success: true,
@@ -118,7 +99,6 @@ app.post("/verify-otp", (req, res) => {
 
     const savedData = otpStore.get(email);
 
-    // OTP not found
     if (!savedData) {
       return res.status(400).json({
         success: false,
@@ -126,7 +106,6 @@ app.post("/verify-otp", (req, res) => {
       });
     }
 
-    // OTP expired
     if (Date.now() > savedData.expiresAt) {
       otpStore.delete(email);
 
@@ -136,7 +115,6 @@ app.post("/verify-otp", (req, res) => {
       });
     }
 
-    // Wrong OTP
     if (otp !== savedData.otp) {
       return res.status(400).json({
         success: false,
@@ -144,7 +122,6 @@ app.post("/verify-otp", (req, res) => {
       });
     }
 
-    // Correct OTP
     otpStore.delete(email);
 
     console.log("OTP verified successfully for:", email);
