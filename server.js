@@ -5,13 +5,23 @@ require("dotenv").config();
 
 const app = express();
 
+// ================= MIDDLEWARE =================
+
 app.use(cors());
 app.use(express.json());
 
-// OTP store
+// Request logging
+app.use((req, res, next) => {
+  console.log("REQUEST:", req.method, req.url);
+  next();
+});
+
+// ================= OTP STORE =================
+
 const otpStore = new Map();
 
-// Gmail transporter
+// ================= GMAIL TRANSPORTER =================
+
 const transporter = nodemailer.createTransport({
   host: "smtp.gmail.com",
   port: 587,
@@ -22,7 +32,17 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-// Test route
+// Check Gmail SMTP connection
+transporter.verify((error, success) => {
+  if (error) {
+    console.error("Gmail SMTP Error:", error);
+  } else {
+    console.log("Gmail SMTP connection is ready");
+  }
+});
+
+// ================= HOME ROUTE =================
+
 app.get("/", (req, res) => {
   res.send("OTP Backend is running!");
 });
@@ -32,6 +52,8 @@ app.get("/", (req, res) => {
 app.post("/send-otp", async (req, res) => {
   try {
     const { email } = req.body;
+
+    console.log("Send OTP requested for:", email);
 
     if (!email) {
       return res.status(400).json({
@@ -43,7 +65,7 @@ app.post("/send-otp", async (req, res) => {
     // Generate 6-digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
-    // OTP expires after 1 minute
+    // OTP expiry: 1 minute
     const expiresAt = Date.now() + 60 * 1000;
 
     // Save OTP
@@ -52,15 +74,19 @@ app.post("/send-otp", async (req, res) => {
       expiresAt: expiresAt,
     });
 
-    // Send email
+    console.log("OTP generated for:", email);
+
+    // Send OTP email
     await transporter.sendMail({
-      from: process.env.EMAIL_USER,
+      from: `"Ritesh Portfolio" <${process.env.EMAIL_USER}>`,
       to: email,
       subject: "Your Portfolio Verification OTP",
       text: `Your verification OTP is ${otp}. This OTP will expire in 1 minute.`,
     });
 
-    res.json({
+    console.log("OTP email sent successfully to:", email);
+
+    return res.status(200).json({
       success: true,
       message: "OTP sent successfully",
     });
@@ -68,7 +94,7 @@ app.post("/send-otp", async (req, res) => {
   } catch (error) {
     console.error("Send OTP Error:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: "Failed to send OTP",
     });
@@ -81,6 +107,8 @@ app.post("/verify-otp", (req, res) => {
   try {
     const { email, otp } = req.body;
 
+    console.log("Verify OTP requested for:", email);
+
     if (!email || !otp) {
       return res.status(400).json({
         success: false,
@@ -90,7 +118,7 @@ app.post("/verify-otp", (req, res) => {
 
     const savedData = otpStore.get(email);
 
-    // OTP doesn't exist
+    // OTP not found
     if (!savedData) {
       return res.status(400).json({
         success: false,
@@ -119,7 +147,9 @@ app.post("/verify-otp", (req, res) => {
     // Correct OTP
     otpStore.delete(email);
 
-    res.json({
+    console.log("OTP verified successfully for:", email);
+
+    return res.status(200).json({
       success: true,
       message: "OTP verified successfully",
     });
@@ -127,7 +157,7 @@ app.post("/verify-otp", (req, res) => {
   } catch (error) {
     console.error("Verify OTP Error:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: "Verification failed",
     });
